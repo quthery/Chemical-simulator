@@ -19,6 +19,7 @@
 - SFML 3.0.2
 - ImGui + ImGui-SFML
 - MinGW-w64 (для Windows-сборки, GCC с поддержкой C++20)
+- Apple Clang / Xcode Command Line Tools (для macOS-сборки)
 
 ## Для сборки проекта необходимо дополнительно установить:
 
@@ -37,6 +38,31 @@ cmake --build build -j 8
 
 После сборки исполняемый файл:
 `Chemical-simulator.exe` в корне проекта.
+
+## Сборка и запуск (macOS)
+Требования:
+- macOS с установленными Xcode Command Line Tools
+- CMake
+- Python 3
+
+Установка пакетов(если нету):
+```bash
+xcode-select --install
+brew install cmake python
+```
+
+Сборка:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j 8
+```
+
+Запуск:
+
+```bash
+./Chemical-simulator
+```
 
 ## Архитектура
 
