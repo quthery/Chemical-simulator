@@ -1,9 +1,10 @@
 #pragma once
 
 #include "BondTable.h"
+#include <cstddef>
 #include <list>
 
-class Atom;
+class AtomStorage;
 
 
 class Bond {
@@ -11,25 +12,21 @@ private:
 public:
     static BondTable bond_default_props;
 
-    static Bond* CreateBond(Atom* a, Atom* b);
-    static void BreakBond(Bond* bond);
+    static Bond* CreateBond(std::size_t aIndex, std::size_t bIndex, AtomStorage& atomStorage);
+    static void BreakBond(Bond* bond, AtomStorage& atomStorage);
     static std::list<Bond> bonds_list;
-    static void angleForce(Atom* a, Atom* b, Atom* c);
+    static void angleForce(AtomStorage& atomStorage, std::size_t aIndex, std::size_t bIndex, std::size_t cIndex);
 
-    Bond (Atom* a, Atom* b);//, float r0, float k, float D_e, float alpha
+    Bond(std::size_t aIndex, std::size_t bIndex, AtomData::Type aType, AtomData::Type bType);
 
-    void forceBond(double dt);
-    bool shouldBreak() const;
-    void detach();
+    void forceBond(AtomStorage& atomStorage, float dt);
+    bool shouldBreak(const AtomStorage& atomStorage) const;
+    void detach(AtomStorage& atomStorage);
     float MorseForce(float distanse);
-    // void angleForce(Atom* a, Atom* b, Atom* c);
 
-    Atom* a;
-    Atom* b;
+    std::size_t aIndex;
+    std::size_t bIndex;
 
     BondParams params;
-    // float r0;
-    // float k;
-    // float D_e;
-    // float alpha;
 };
+

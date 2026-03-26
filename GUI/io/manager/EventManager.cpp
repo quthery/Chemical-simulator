@@ -8,13 +8,13 @@
 sf::RenderWindow* EventManager::window = nullptr;
 std::unique_ptr<IRenderer>* EventManager::renderer = nullptr;
 
-void EventManager::init(sf::RenderWindow* w, sf::View* ui, std::unique_ptr<IRenderer>& r, SimBox* b, std::vector<Atom>* a) {
+void EventManager::init(sf::RenderWindow* w, sf::View* ui, std::unique_ptr<IRenderer>& r, SimBox* b, AtomStorage* atomStorage) {
     window = w;
     renderer = &r;
 
     WindowEvents::init(w, ui);
     Keyboard::init(r);
-    Mouse::init(w, r, b, a);
+    Mouse::init(w, r, b, atomStorage);
 }
 
 void EventManager::poll() {
@@ -30,5 +30,5 @@ void EventManager::poll() {
 
 void EventManager::frame(float deltaTime) {
     Keyboard::onFrame(deltaTime);
-    Mouse::onFrame();
+    Mouse::onFrame(deltaTime);
 }

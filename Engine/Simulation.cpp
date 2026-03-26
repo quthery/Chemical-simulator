@@ -1,58 +1,74 @@
 #include <fstream>
 #include <cmath>
 #include <iostream>
+#include <sstream>
+#include <vector>
 
 #include "Simulation.h"
 #include "physics/Bond.h"
 
+namespace {
+float kineticEnergy(AtomData::Type type, const Vec3f& speed) {
+    return 0.5f * AtomData::getProps(type).mass * speed.sqrAbs();
+}
+}
+
 Simulation::Simulation(SimBox& box)
-    :  sim_box(box), integrator()
-{
-    // резервируем место под создание атомов
-    atoms.reserve(50000);
+    : sim_box(box), integrator() {
+    atomStorage.reserve(250000);
+    forceField.updateBoxCache(sim_box); // обновление кэша для параметров стен
 }
 
 void Simulation::update(float dt) {
-    integrator.step(atoms, sim_box, forceField, dt);
+    integrator.step(atomStorage, sim_box, forceField, dt);
     ++sim_step;
 }
 
-void Simulation::setSizeBox(Vec3D newStart, Vec3D newEnd, int cellSize) {
+void Simulation::setSizeBox(Vec3f newStart, Vec3f newEnd, int cellSize) {
     if (sim_box.setSizeBox(newStart, newEnd, cellSize)) {
-        for (Atom& atom : atoms) {
-            const int cellX = sim_box.grid.worldToCellX(atom.coords.x);
-            const int cellY = sim_box.grid.worldToCellY(atom.coords.y);
-            const int cellZ = sim_box.grid.worldToCellZ(atom.coords.z);
-            sim_box.grid.insert(cellX, cellY, cellZ, &atom);
+        forceField.updateBoxCache(sim_box);
+        for (std::size_t atomIndex = 0; atomIndex < atomStorage.size(); ++atomIndex) {
+            const Vec3f pos = atomStorage.pos(atomIndex);
+            const int cellX = sim_box.grid.worldToCellX(pos.x);
+            const int cellY = sim_box.grid.worldToCellY(pos.y);
+            const int cellZ = sim_box.grid.worldToCellZ(pos.z);
+            sim_box.grid.insertIndex(cellX, cellY, cellZ, atomIndex);
         }
     }
 }
 
-void Simulation::createRandomAtoms(Atom::Type type, int quantity) {
+void Simulation::createRandomAtoms(AtomData::Type type, int quantity) {
     const double z_mid = (sim_box.end.z - sim_box.start.z) * 0.5;
     for (int i = 0; i < quantity; ++i) {
         for (int j = 0; j < 10; ++j) {
-            double r_x = std::rand() % int(sim_box.end.x-sim_box.start.x-4);
-            double r_y = std::rand() % int(sim_box.end.y-sim_box.start.y-4);
-            Vec3D coords(r_x+2, r_y+2, z_mid);
+            double r_x = std::rand() % int(sim_box.end.x - sim_box.start.x - 4);
+            double r_y = std::rand() % int(sim_box.end.y - sim_box.start.y - 4);
+            Vec3f coords(r_x + 2, r_y + 2, z_mid);
             if (!checkNeighbor(coords, 4)) {
-                createAtom(coords, Vec3D::Random() * 5.0, type);
+                createAtom(coords, Vec3f::Random() * 5.0, type);
                 break;
             }
         }
     }
 }
 
-bool Simulation::checkNeighbor(Vec3D coords, float delta) {
+bool Simulation::checkNeighbor(Vec3f coords, float delta) {
     int curr_x = sim_box.grid.worldToCellX(coords.x);
     int curr_y = sim_box.grid.worldToCellY(coords.y);
     int curr_z = sim_box.grid.worldToCellZ(coords.z);
+    const float deltaSqr = delta * delta;
     for (int i = -1; i <= 1; ++i) {
         for (int j = -1; j <= 1; ++j) {
             for (int k = -1; k <= 1; ++k) {
-                if (auto cell = sim_box.grid.at(curr_x - i, curr_y - j, curr_z - k)) {
-                    for (Atom* other : *cell) {
-                        if ((coords - other->coords).sqrAbs() < delta*delta) return true;
+                if (auto cell = sim_box.grid.atIndex(curr_x - i, curr_y - j, curr_z - k)) {
+                    for (std::size_t atomIndex : *cell) {
+                        if (atomIndex >= atomStorage.size()) {
+                            continue;
+                        }
+
+                        if ((coords - atomStorage.pos(atomIndex)).sqrAbs() < deltaSqr) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -61,76 +77,129 @@ bool Simulation::checkNeighbor(Vec3D coords, float delta) {
     return false;
 }
 
-Atom* Simulation::createAtom(Vec3D start_coords, Vec3D start_speed, Atom::Type type, bool fixed) {
-    atoms.emplace_back(start_coords, start_speed, type, fixed);
-    Atom* atom = &atoms.back();
-    const int cellX = sim_box.grid.worldToCellX(atom->coords.x);
-    const int cellY = sim_box.grid.worldToCellY(atom->coords.y);
-    const int cellZ = sim_box.grid.worldToCellZ(atom->coords.z);
-    sim_box.grid.insert(cellX, cellY, cellZ, atom);
-    return atom;
+bool Simulation::createAtom(Vec3f start_coords, Vec3f start_speed, AtomData::Type type, bool fixed) {
+    atomStorage.addAtom(start_coords, start_speed, type, fixed);
+    const std::size_t atomIndex = atomStorage.size() - 1;
+    const int cellX = sim_box.grid.worldToCellX(start_coords.x);
+    const int cellY = sim_box.grid.worldToCellY(start_coords.y);
+    const int cellZ = sim_box.grid.worldToCellZ(start_coords.z);
+    sim_box.grid.insertIndex(cellX, cellY, cellZ, atomIndex);
+    return true;
 }
 
-void Simulation::addBond(Atom* a1, Atom* a2) {
-    // FIXME Здесь возможен баг, что если вектор атомов переаллоцирован, то указатели станут не валидными
-    Bond::CreateBond(a1, a2);
+bool Simulation::removeAtom(std::size_t atomIndex) {
+    if (atomIndex >= atomStorage.size()) {
+        return false;
+    }
+
+    const std::size_t lastIndex = atomStorage.size() - 1;
+
+    for (auto it = Bond::bonds_list.begin(); it != Bond::bonds_list.end();) {
+        if (it->aIndex == atomIndex || it->bIndex == atomIndex) {
+            if (it->aIndex == atomIndex && it->bIndex != atomIndex && it->bIndex < atomStorage.size()) {
+                ++atomStorage.valenceCount(it->bIndex);
+            }
+            if (it->bIndex == atomIndex && it->aIndex != atomIndex && it->aIndex < atomStorage.size()) {
+                ++atomStorage.valenceCount(it->aIndex);
+            }
+            it = Bond::bonds_list.erase(it);
+            continue;
+        }
+
+        if (atomIndex != lastIndex) {
+            if (it->aIndex == lastIndex) {
+                it->aIndex = atomIndex;
+            }
+            if (it->bIndex == lastIndex) {
+                it->bIndex = atomIndex;
+            }
+        }
+
+        ++it;
+    }
+
+    atomStorage.removeAtom(atomIndex);
+
+    sim_box.grid.resize(sim_box.grid.sizeX, sim_box.grid.sizeY, sim_box.grid.sizeZ, sim_box.grid.cellSize);
+    for (std::size_t index = 0; index < atomStorage.size(); ++index) {
+        const Vec3f pos = atomStorage.pos(index);
+        const int cellX = sim_box.grid.worldToCellX(pos.x);
+        const int cellY = sim_box.grid.worldToCellY(pos.y);
+        const int cellZ = sim_box.grid.worldToCellZ(pos.z);
+        sim_box.grid.insertIndex(cellX, cellY, cellZ, index);
+    }
+
+    return true;
 }
 
-double Simulation::averageKineticEnegry() const {
-    /* расчет средней кинетической энергии */
-    if (atoms.empty()) {
+void Simulation::addBond(std::size_t aIndex, std::size_t bIndex) {
+    if (aIndex >= atomStorage.size() || bIndex >= atomStorage.size()) {
+        return;
+    }
+
+    Bond::CreateBond(aIndex, bIndex, atomStorage);
+}
+
+float Simulation::averageKineticEnegry() const {
+    if (atomStorage.empty()) {
         return 0.0;
     }
 
     double kineticEnergy = 0.0;
-    for (const Atom& atom : atoms) {
-        kineticEnergy += atom.kineticEnergy();
+    for (std::size_t atomIndex = 0; atomIndex < atomStorage.size(); ++atomIndex) {
+        kineticEnergy += ::kineticEnergy(atomStorage.type(atomIndex), atomStorage.vel(atomIndex));
     }
 
-    return kineticEnergy / static_cast<double>(atoms.size());
+    return kineticEnergy / static_cast<double>(atomStorage.size());
 }
 
-double Simulation::averagePotentialEnergy() const {
-    /* расчет средней потенциальной энергии */
-    if (atoms.empty()) {
+float Simulation::averagePotentialEnergy() const {
+    if (atomStorage.empty()) {
         return 0.0;
     }
 
     double potentialEnergy = 0.0;
-    for (const Atom& atom : atoms) {
-        potentialEnergy += atom.potential_energy;
+    for (std::size_t atomIndex = 0; atomIndex < atomStorage.size(); ++atomIndex) {
+        potentialEnergy += atomStorage.energy(atomIndex);
     }
 
-    return potentialEnergy / static_cast<double>(atoms.size());
+    return potentialEnergy / static_cast<double>(atomStorage.size());
 }
 
-double Simulation::fullAverageEnergy() const {
-    /* расчет полной средней энергии */
+float Simulation::fullAverageEnergy() const {
     return averageKineticEnegry() + averagePotentialEnergy();
 }
 
 void Simulation::logAtomPos() const {
-    int i = 0;
-    for (const Atom& atom : atoms) {
+    for (std::size_t i = 0; i < atomStorage.size(); ++i) {
+        const Vec3f pos = atomStorage.pos(i);
         std::cout << "<Pos> Atom (" << i
-                  << ") X " << atom.coords.x
-                  << " | Y " << atom.coords.y
-                  << " | Z " << atom.coords.z
+                  << ") X " << pos.x
+                  << " | Y " << pos.y
+                  << " | Z " << pos.z
                   << std::endl;
-        i++;
     }
 }
 
 void Simulation::logBondList() const {
-    for (const Atom& atom : atoms) {
-        if (atom.bonds.size() > 0) {
-            std::cout << atom.bonds.size() << std::endl;
+    std::vector<int> bondCounts(atomStorage.size(), 0);
+    for (const Bond& bond : Bond::bonds_list) {
+        if (bond.aIndex < bondCounts.size()) {
+            ++bondCounts[bond.aIndex];
+        }
+        if (bond.bIndex < bondCounts.size()) {
+            ++bondCounts[bond.bIndex];
+        }
+    }
+
+    for (int count : bondCounts) {
+        if (count > 0) {
+            std::cout << count << std::endl;
         }
     }
 }
 
-void Simulation::save(std::string_view path) const
-{
+void Simulation::save(std::string_view path) const {
     std::ofstream file(path.data());
     if (!file.is_open()) return;
 
@@ -140,12 +209,14 @@ void Simulation::save(std::string_view path) const
 
     file << "step " << sim_step << "\n";
 
-    for (const Atom& atom : atoms) {
+    for (std::size_t atomIndex = 0; atomIndex < atomStorage.size(); ++atomIndex) {
+        const Vec3f pos = atomStorage.pos(atomIndex);
+        const Vec3f vel = atomStorage.vel(atomIndex);
         file << "atom "
-             << atom.coords.x << " " << atom.coords.y << " " << atom.coords.z << " "
-             << atom.speed.x  << " " << atom.speed.y  << " " << atom.speed.z  << " "
-             << static_cast<int>(atom.type)     << " "
-             << atom.isFixed  << "\n";
+             << pos.x << " " << pos.y << " " << pos.z << " "
+             << vel.x << " " << vel.y << " " << vel.z << " "
+             << static_cast<int>(atomStorage.type(atomIndex)) << " "
+             << atomStorage.isAtomFixed(atomIndex) << "\n";
     }
 }
 
@@ -155,16 +226,14 @@ void Simulation::load(std::string_view path) {
 
     clear();
 
-    // временный буфер чтобы не было реаллокаций
-    struct AtomData {
-        Vec3D coords, speed;
+    struct LoadedAtomData {
+        Vec3f coords, speed;
         int type;
-        float a0, eps;
         bool fixed;
     };
-    std::vector<AtomData> buffer;
+    std::vector<LoadedAtomData> buffer;
 
-    Vec3D boxStart, boxEnd;
+    Vec3f boxStart, boxEnd;
     int cellSize = -1;
 
     std::string tag;
@@ -177,24 +246,38 @@ void Simulation::load(std::string_view path) {
             file >> sim_step;
         }
         else if (tag == "atom") {
-            AtomData d;
-            file >> d.coords.x >> d.coords.y >> d.coords.z
-                 >> d.speed.x  >> d.speed.y  >> d.speed.z
-                 >> d.type >> d.a0 >> d.eps >> d.fixed;
+            LoadedAtomData d{Vec3f(0.f, 0.f, 0.f), Vec3f(0.f, 0.f, 0.f), 0, false};
+            std::string atomLine;
+            std::getline(file, atomLine);
+            std::istringstream atomStream(atomLine);
+
+            if (!(atomStream >> d.coords.x >> d.coords.y >> d.coords.z
+                             >> d.speed.x  >> d.speed.y  >> d.speed.z
+                             >> d.type)) {
+                continue;
+            }
+
+            std::vector<double> tail;
+            double value = 0.0;
+            while (atomStream >> value) {
+                tail.push_back(value);
+            }
+            d.fixed = !tail.empty() && (tail.back() != 0.0);
             buffer.emplace_back(d);
         }
     }
 
     setSizeBox(boxStart, boxEnd, cellSize);
 
-    atoms.reserve(buffer.size());
-    for (const AtomData& d : buffer) {
-        Atom* atom = createAtom(d.coords, d.speed, static_cast<Atom::Type>(d.type), d.fixed);
+    for (const LoadedAtomData& d : buffer) {
+        createAtom(d.coords, d.speed, static_cast<AtomData::Type>(d.type), d.fixed);
     }
 }
 
 void Simulation::clear() {
-    atoms.clear();
+    atomStorage.clear();
     Bond::bonds_list.clear();
+    sim_box.grid.resize(sim_box.grid.sizeX, sim_box.grid.sizeY, sim_box.grid.sizeZ, sim_box.grid.cellSize);
     sim_step = 0;
 }
+

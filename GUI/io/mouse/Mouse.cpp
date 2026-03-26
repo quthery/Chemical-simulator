@@ -8,13 +8,13 @@
 sf::RenderWindow*  Mouse::window = nullptr;
 std::unique_ptr<IRenderer>* Mouse::renderer = nullptr;
 SimBox* Mouse::box = nullptr;
-std::vector<Atom>* Mouse::atoms = nullptr;
+AtomStorage* Mouse::atomStorage = nullptr;
 
-void Mouse::init(sf::RenderWindow* w, std::unique_ptr<IRenderer>& r, SimBox* b, std::vector<Atom>* a) {
+void Mouse::init(sf::RenderWindow* w, std::unique_ptr<IRenderer>& r, SimBox* b, AtomStorage* storage) {
     window = w;
     renderer = &r;
     box = b;
-    atoms = a;
+    atomStorage = storage;
 }
 
 void Mouse::onEvent(const sf::Event& event) {
@@ -23,7 +23,7 @@ void Mouse::onEvent(const sf::Event& event) {
 
     if (const auto* e = event.getIf<sf::Event::MouseButtonPressed>()) {
         if (e->button == sf::Mouse::Button::Left) {
-            Tools::onLeftPressed(mouse_pos, *atoms);
+            Tools::onLeftPressed(mouse_pos);
         }
 
         if (e->button == sf::Mouse::Button::Right && !Interface::cursorHovered) {
@@ -35,7 +35,7 @@ void Mouse::onEvent(const sf::Event& event) {
 
     if (const auto* e = event.getIf<sf::Event::MouseButtonReleased>()) {
         if (e->button == sf::Mouse::Button::Left) {
-            Tools::onLeftReleased(*atoms);
+            Tools::onLeftReleased();
         }
 
         if (e->button == sf::Mouse::Button::Right) {
@@ -65,14 +65,14 @@ void Mouse::onEvent(const sf::Event& event) {
     }
 }
 
-void Mouse::onFrame() {
-    Tools::onFrame(*atoms);
+void Mouse::onFrame(float deltaTime) {
+    Tools::onFrame(deltaTime);
 }
 
 void Mouse::logMousePos() {
     sf::Vector2i mouse_pos = sf::Mouse::getPosition(*window);
-    Vec2D world_pos = Tools::screenToWorld(mouse_pos);
-    Vec2D local_pos = Tools::screenToBox(mouse_pos);
+    Vec2f world_pos = Tools::screenToWorld(mouse_pos);
+    Vec2f local_pos = Tools::screenToBox(mouse_pos);
     std::cout << "<Mouse pos>"
               << " Screen: "
               << "X " << mouse_pos.x

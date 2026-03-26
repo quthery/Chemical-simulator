@@ -8,7 +8,8 @@ SpatialGrid::SpatialGrid(int sizeX, int sizeY, int sizeZ, int cellSize)
       sizeY(sizeY),
       sizeZ(sizeZ),
       cellSize(cellSize),
-      grid(sizeX * sizeY * sizeZ) {
+      grid(sizeX * sizeY * sizeZ),
+      indexGrid(sizeX * sizeY * sizeZ) {
     if (sizeX < 0 || sizeY < 0 || sizeZ < 0)
         throw std::invalid_argument("SpatialGrid::SpatialGrid: invalid arguments");
 }
@@ -22,16 +23,33 @@ void SpatialGrid::resize(int newSizeX, int newSizeY, int newSizeZ, int newCellSi
     sizeY = newSizeY;
     sizeZ = newSizeZ;
     grid.assign(sizeX * sizeY * sizeZ, {});
+    indexGrid.assign(sizeX * sizeY * sizeZ, {});
 }
 
-void SpatialGrid::insert(int x, int y, int z, Atom* atom) {
-    if (auto* cell = at(x, y, z))
+void SpatialGrid::insert(int x, int y, int z, AtomData* atom) {
+    if (auto* cell = at(x, y, z)) {
         cell->emplace_back(atom);
+    }
 }
 
-void SpatialGrid::erase(int x, int y, int z, Atom* atom) {
+void SpatialGrid::erase(int x, int y, int z, AtomData* atom) {
     if (auto* cell = at(x, y, z)) {
         auto it = std::find(cell->begin(), cell->end(), atom);
+        if (it != cell->end()) {
+            *it = cell->back();
+            cell->pop_back();
+        }
+    }
+}
+
+void SpatialGrid::insertIndex(int x, int y, int z, std::size_t atomIndex) {
+    if (auto* cell = atIndex(x, y, z))
+        cell->emplace_back(atomIndex);
+}
+
+void SpatialGrid::eraseIndex(int x, int y, int z, std::size_t atomIndex) {
+    if (auto* cell = atIndex(x, y, z)) {
+        auto it = std::find(cell->begin(), cell->end(), atomIndex);
         if (it != cell->end()) {
             *it = cell->back();
             cell->pop_back();

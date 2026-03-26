@@ -19,8 +19,8 @@ namespace Benchmarks {
             .scene      = SceneKind::Crystal3D,
             .integrator = Integrator::Scheme::Verlet,
             .atomCount  = atomCount,
-            .boxStart   = Vec3D(-80.0, -80.0, -80.0),
-            .boxEnd     = Vec3D( 80.0,  80.0,  80.0),
+            .boxStart   = Vec3f(-80.0, -80.0, -80.0),
+            .boxEnd     = Vec3f( 80.0,  80.0,  80.0),
             .cellSize   = 5
         };
     }
@@ -30,7 +30,7 @@ class SimulationFixture : public benchmark::Fixture {
 public:
     void SetUp(benchmark::State& state) override {
         atomCount_  = static_cast<int>(state.range(0));
-        box_ = std::make_unique<SimBox>(Vec3D(-80, -80, -80), Vec3D(80, 80, 80));
+        box_ = std::make_unique<SimBox>(Vec3f(-80, -80, -80), Vec3f(80, 80, 80));
         simulation_ = std::make_unique<Simulation>(*box_);
     }
 
@@ -49,7 +49,7 @@ protected:
     void prepareForPredict() {
         rebuildScene();
         StepOps::computeForces(
-            simulation_->atoms, simulation_->sim_box,
+            simulation_->atomStorage, simulation_->sim_box,
             simulation_->forceField, Benchmarks::kDt
         );
     }
@@ -57,11 +57,11 @@ protected:
     void prepareForCorrect() {
         prepareForPredict();
         StepOps::predictAndSync(
-            simulation_->atoms, simulation_->sim_box,
+            simulation_->atomStorage, simulation_->sim_box,
             Benchmarks::kDt, &VerletScheme::predict
         );
         StepOps::computeForces(
-            simulation_->atoms, simulation_->sim_box,
+            simulation_->atomStorage, simulation_->sim_box,
             simulation_->forceField, Benchmarks::kDt
         );
     }

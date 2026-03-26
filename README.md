@@ -128,7 +128,7 @@ cmake --build build -j $(sysctl -n hw.ncpu)
 - `speedGradient`
 - `speedGradientTurbo`
 
-### `Atom` (`Engine/physics/Atom.h`)
+### `Atom` (`Engine/physics/AtomData.h`)
 
 - `void PredictPosition(double deltaTime)`
 Шаг интегратора (Verlet-предсказание позиции).
@@ -191,3 +191,4 @@ cmake --build build -j $(sysctl -n hw.ncpu)
 - [SFML](https://github.com/SFML/SFML)
 - [ImGui](https://github.com/ocornut/imgui)
 - [ImGui-SFML](https://github.com/SFML/imgui-sfml)
+

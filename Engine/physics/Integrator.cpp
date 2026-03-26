@@ -1,5 +1,7 @@
 #include "Integrator.h"
 
+#include "AtomStorage.h"
+
 Integrator::Integrator()
     : integrator_type(Scheme::Verlet),
       scheme_impl(makeSchemeImpl(Scheme::Verlet)) {}
@@ -9,9 +11,9 @@ void Integrator::setScheme(Scheme scheme) {
     scheme_impl = makeSchemeImpl(scheme);
 }
 
-void Integrator::step(std::vector<Atom>& atoms, SimBox& box, ForceField& forceField, double dt) const {
+void Integrator::step(AtomStorage& atomStorage, SimBox& box, ForceField& forceField, float dt) const {
     std::visit([&](const auto& scheme) {
-        scheme.pipeline(atoms, box, forceField, dt);
+        scheme.pipeline(atomStorage, box, forceField, dt);
     }, scheme_impl);
 }
 

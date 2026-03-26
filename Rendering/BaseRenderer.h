@@ -3,14 +3,15 @@
 #include <vector>
 
 #include "Rendering/camera/Camera.h"
-#include "Engine/physics/Atom.h"
+#include "Engine/physics/AtomData.h"
+#include "Engine/physics/AtomStorage.h"
 #include "Engine/SimBox.h"
 
 class IRenderer {
 public:
     virtual ~IRenderer() = default;
 
-    virtual void drawShot(const std::vector<Atom>& atoms,
+    virtual void drawShot(const AtomStorage& atoms,
                           const SimBox& box) = 0;
     
     virtual void drawOverlay() = 0;
@@ -19,11 +20,13 @@ public:
 
     virtual void showBoxContour(bool show) { isBoxVisible = show; }
     virtual void showLassoContour(bool show) { isLassoVisible = show; }
+    void setAtomStorage(const AtomStorage* storage) { atomStorage = storage; }
 
     bool drawGrid           = false;
     bool drawBonds          = false;
     bool speedGradient      = false;
     bool speedGradientTurbo = false;
+    float speedGradientMax  = 5.0f; // 0.0f = auto
     float drawBondsZoom     = 25.f;
     float alpha             = 0.05f;
 
@@ -35,6 +38,7 @@ public:
 protected:
     IRenderer(sf::View& gv)
         : camera(&gv) {}
+    const AtomStorage* atomStorage = nullptr;
 
     sf::Color turboColor(float t) {
         t = std::clamp(t, 0.f, 1.f);

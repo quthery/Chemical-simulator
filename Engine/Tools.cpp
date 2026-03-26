@@ -6,10 +6,9 @@
 #include <limits>
 #include <utility>
 
-#include "math/Consts.h"
-#include "SimBox.h"
 #include "GUI/interface/interface.h"
-#include "physics/Bond.h"
+#include "SimBox.h"
+#include "math/Consts.h"
 
 namespace {
 Tools::Mode mapPanelTool(SideToolsPanel::Tool tool) {
@@ -21,103 +20,6 @@ Tools::Mode mapPanelTool(SideToolsPanel::Tool tool) {
     case SideToolsPanel::Tool::RemoveAtom: return Tools::Mode::RemoveAtom;
     }
     return Tools::Mode::Cursor;
-}
-
-void removeBondsWithAtom(Atom* atom) {
-    for (auto it = Bond::bonds_list.begin(); it != Bond::bonds_list.end();) {
-        if (it->a == atom || it->b == atom) {
-            it->detach();
-            it = Bond::bonds_list.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
-
-void replaceAtomPointer(Atom* oldPtr, Atom* newPtr, std::vector<Atom>& atoms, Atom*& selectedMoveAtom) {
-    if (!oldPtr || !newPtr || oldPtr == newPtr) {
-        return;
-    }
-
-    if (selectedMoveAtom == oldPtr) {
-        selectedMoveAtom = newPtr;
-    }
-
-    if (Tools::selected_atom_batch.erase(oldPtr) > 0) {
-        Tools::selected_atom_batch.insert(newPtr);
-    }
-
-    for (Bond& bond : Bond::bonds_list) {
-        if (bond.a == oldPtr) {
-            bond.a = newPtr;
-        }
-        if (bond.b == oldPtr) {
-            bond.b = newPtr;
-        }
-    }
-
-    for (Atom& atom : atoms) {
-        for (Atom*& bondedAtom : atom.bonds) {
-            if (bondedAtom == oldPtr) {
-                bondedAtom = newPtr;
-            }
-        }
-    }
-}
-
-void rebuildGrid(SpatialGrid* grid, std::vector<Atom>& atoms) {
-    if (!grid) {
-        return;
-    }
-
-    for (int z = 0; z < grid->sizeZ; ++z) {
-        for (int y = 0; y < grid->sizeY; ++y) {
-            for (int x = 0; x < grid->sizeX; ++x) {
-                if (auto* cell = grid->at(x, y, z)) {
-                    cell->clear();
-                }
-            }
-        }
-    }
-
-    for (Atom& atom : atoms) {
-        const int cellX = grid->worldToCellX(atom.coords.x);
-        const int cellY = grid->worldToCellY(atom.coords.y);
-        const int cellZ = grid->worldToCellZ(atom.coords.z);
-        grid->insert(cellX, cellY, cellZ, &atom);
-    }
-}
-
-bool removeAtomInternal(Atom* target, SpatialGrid* grid, std::vector<Atom>& atoms, Atom*& selectedMoveAtom, bool rebuildAfterRemove) {
-    if (!target || atoms.empty()) {
-        return false;
-    }
-
-    const std::size_t removeIndex = static_cast<std::size_t>(target - atoms.data());
-    if (removeIndex >= atoms.size()) {
-        return false;
-    }
-
-    Tools::selected_atom_batch.erase(target);
-    if (selectedMoveAtom == target) {
-        selectedMoveAtom = nullptr;
-    }
-
-    removeBondsWithAtom(target);
-
-    const std::size_t lastIndex = atoms.size() - 1;
-    if (removeIndex != lastIndex) {
-        Atom* movedOldPtr = &atoms[lastIndex];
-        std::swap(atoms[removeIndex], atoms[lastIndex]);
-        Atom* movedNewPtr = &atoms[removeIndex];
-        replaceAtomPointer(movedOldPtr, movedNewPtr, atoms, selectedMoveAtom);
-    }
-
-    atoms.pop_back();
-    if (rebuildAfterRemove) {
-        rebuildGrid(grid, atoms);
-    }
-    return true;
 }
 
 bool pointOnSegment(const sf::Vector2i& p, const sf::Vector2i& a, const sf::Vector2i& b) {
@@ -141,10 +43,9 @@ bool isPointInsidePolygon(const sf::Vector2i& p, const std::vector<sf::Vector2i>
         return false;
     }
 
-    // 1. Быстрая проверка через (AABB)
     int minX = polygon[0].x, maxX = polygon[0].x;
     int minY = polygon[0].y, maxY = polygon[0].y;
-    
+
     for (std::size_t i = 1; i < polygon.size(); ++i) {
         if (polygon[i].x < minX) minX = polygon[i].x;
         else if (polygon[i].x > maxX) maxX = polygon[i].x;
@@ -179,69 +80,70 @@ bool isPointInsidePolygon(const sf::Vector2i& p, const std::vector<sf::Vector2i>
 void syncLassoContour(std::unique_ptr<IRenderer>& render, const std::vector<sf::Vector2i>& screenPoints) {
     render->setLassoContour(screenPoints);
 }
-
-Atom* pickSelectedAtomWithPadding(sf::Vector2i mouse_pos, float zoom, const SimBox* box) {
-    if (!box || Tools::selected_atom_batch.empty()) {
-        return nullptr;
-    }
-
-    const Vec2D world = Tools::screenToWorld(mouse_pos);
-    const Vec2D local(world.x - box->start.x, world.y - box->start.y);
-
-    Atom* best = nullptr;
-    double bestDistSqr = std::numeric_limits<double>::max();
-
-    const float selectedCount = static_cast<float>(Tools::selected_atom_batch.size());
-    const float extraPixels = 10.0f + std::min(20.0f, std::log2(selectedCount + 1.0f) * 6.0f);
-    const double extraWorld = static_cast<double>(extraPixels / std::max(zoom, 1.0f));
-
-    for (Atom* atom : Tools::selected_atom_batch) {
-        if (!atom) {
-            continue;
-        }
-
-        const Vec2D center(
-            atom->coords.x + atom->getProps().radius,
-            atom->coords.y + atom->getProps().radius
-        );
-        const Vec2D delta = center - local;
-        const double distSqr = delta.sqrAbs();
-        const double pickRadius = std::max(0.5, atom->getProps().radius) + extraWorld;
-        if (distSqr <= pickRadius * pickRadius && distSqr < bestDistSqr) {
-            bestDistSqr = distSqr;
-            best = atom;
-        }
-    }
-
-    return best;
-}
-}
+} // namespace
 
 sf::RenderWindow* Tools::window = nullptr;
 sf::View* Tools::gameView = nullptr;
 std::unique_ptr<IRenderer>* Tools::renderer = nullptr;
 SpatialGrid* Tools::grid = nullptr;
 SimBox* Tools::box = nullptr;
+AtomStorage* Tools::atomStorage = nullptr;
 Tools::AtomCreator Tools::atomCreator = {};
-std::unordered_set<Atom*> Tools::selected_atom_batch{};
+Tools::AtomRemover Tools::atomRemover = {};
+std::unordered_set<std::size_t> Tools::selected_atom_batch{};
 bool Tools::atomMoveFlag = false;
 bool Tools::selectionFrameMoveFlag = false;
 bool Tools::lassoSelectionMoveFlag = false;
-Atom* Tools::selectedMoveAtom = nullptr;
+std::size_t Tools::selectedMoveAtomIndex = Tools::InvalidIndex;
 sf::Vector2i Tools::start_mouse_pos = {};
 std::vector<sf::Vector2i> Tools::lassoPoints{};
 
-void Tools::init(sf::RenderWindow* w, sf::View* gv, SpatialGrid* gr, SimBox* b, std::unique_ptr<IRenderer>& rend, AtomCreator createAtomFn) {
+void Tools::init(sf::RenderWindow* w,
+                 sf::View* gv,
+                 SpatialGrid* gr,
+                 SimBox* b,
+                 std::unique_ptr<IRenderer>& rend,
+                 AtomStorage* storage,
+                 AtomCreator createAtomFn,
+                 AtomRemover removeAtomFn) {
     window = w;
     gameView = gv;
     grid = gr;
     box = b;
     renderer = &rend;
+    atomStorage = storage;
     atomCreator = std::move(createAtomFn);
+    atomRemover = std::move(removeAtomFn);
 }
 
-void Tools::onLeftPressed(sf::Vector2i mouse_pos, std::vector<Atom>& atoms) {
-    if (Interface::cursorHovered || !renderer->get()) {
+void Tools::resetInteractionState() {
+    if (atomStorage) {
+        for (std::size_t atomIndex : selected_atom_batch) {
+            if (atomIndex < atomStorage->size()) {
+                atomStorage->setSelected(atomIndex, false);
+            }
+        }
+    }
+    selected_atom_batch.clear();
+
+    selectedMoveAtomIndex = InvalidIndex;
+    atomMoveFlag = false;
+    selectionFrameMoveFlag = false;
+    lassoSelectionMoveFlag = false;
+    lassoPoints.clear();
+    start_mouse_pos = {};
+    Interface::countSelectedAtom = 0;
+    Interface::drawToolTrip = false;
+
+    if (renderer && renderer->get()) {
+        (*renderer)->showBoxContour(false);
+        (*renderer)->showLassoContour(false);
+        (*renderer)->setLassoContour({});
+    }
+}
+
+void Tools::onLeftPressed(sf::Vector2i mousePos) {
+    if (Interface::cursorHovered || !renderer || !renderer->get()) {
         return;
     }
 
@@ -257,78 +159,89 @@ void Tools::onLeftPressed(sf::Vector2i mouse_pos, std::vector<Atom>& atoms) {
 
     const auto beginFrameSelection = [&]() {
         selectionFrameMoveFlag = true;
-        start_mouse_pos = mouse_pos;
-        selectionFrame(start_mouse_pos, mouse_pos, atoms);
+        start_mouse_pos = mousePos;
+        selectionFrame(start_mouse_pos, mousePos);
         rend->showBoxContour(true);
     };
 
     switch (currentMode()) {
     case Mode::AddAtom:
-        tryAddAtom(mouse_pos, atoms, static_cast<Atom::Type>(Interface::getSelectedAtom()));
+        tryAddAtom(mousePos, static_cast<AtomData::Type>(Interface::getSelectedAtom()));
         break;
     case Mode::RemoveAtom:
-        tryRemoveAtom(mouse_pos, atoms, selectedMoveAtom);
+        tryRemoveAtom(mousePos);
         break;
     case Mode::Frame:
         beginFrameSelection();
         break;
-    case Mode::Lasso: {
+    case Mode::Lasso:
         lassoSelectionMoveFlag = true;
         lassoPoints.clear();
-        start_mouse_pos = mouse_pos;
-        lassoPoints.emplace_back(mouse_pos);
+        start_mouse_pos = mousePos;
+        lassoPoints.emplace_back(mousePos);
         syncLassoContour(rend, lassoPoints);
         rend->showLassoContour(true);
         break;
-    }
     case Mode::Cursor:
-    default:
-        Atom* pickedAtom = pickAtom(mouse_pos);
-        if (!pickedAtom && selected_atom_batch.size() > 1) {
-            pickedAtom = pickSelectedAtomWithPadding(mouse_pos, rend->camera.getZoom(), box);
+    default: {
+        std::size_t pickedIndex = pickAtom(mousePos);
+        if (pickedIndex == InvalidIndex && selected_atom_batch.size() > 1) {
+            pickedIndex = pickSelectedAtomWithPadding(mousePos, rend->camera.getZoom());
         }
 
-        if (pickedAtom) {
-            selectedMoveAtom = pickedAtom;
+        if (pickedIndex != InvalidIndex) {
+            selectedMoveAtomIndex = pickedIndex;
             atomMoveFlag = true;
 
-            if (!selected_atom_batch.contains(pickedAtom)) {
-                selected_atom_batch.clear();
-                for (Atom& atom : atoms) {
-                    atom.isSelect = false;
+            if (!selected_atom_batch.contains(pickedIndex)) {
+                for (std::size_t atomIndex : selected_atom_batch) {
+                    if (atomStorage && atomIndex < atomStorage->size()) {
+                        atomStorage->setSelected(atomIndex, false);
+                    }
                 }
-                pickedAtom->isSelect = true;
-                selected_atom_batch.insert(pickedAtom);
+                selected_atom_batch.clear();
+                selected_atom_batch.insert(pickedIndex);
+                if (atomStorage && pickedIndex < atomStorage->size()) {
+                    atomStorage->setSelected(pickedIndex, true);
+                }
                 Interface::countSelectedAtom = 1;
             }
         }
         break;
     }
+    }
 }
 
-void Tools::onLeftReleased(std::vector<Atom>& atoms) {
+void Tools::onLeftReleased() {
+    if (!renderer || !renderer->get() || !atomStorage) {
+        return;
+    }
     std::unique_ptr<IRenderer>& rend = *renderer;
+
     if (lassoSelectionMoveFlag && window) {
-        const sf::Vector2i mouse_pos = sf::Mouse::getPosition(*window);
-        if (lassoPoints.empty() || (lassoPoints.back() - mouse_pos).lengthSquared() > Consts::Epsilon) {
-            lassoPoints.emplace_back(mouse_pos);
+        const sf::Vector2i mousePos = sf::Mouse::getPosition(*window);
+        if (lassoPoints.empty() || (lassoPoints.back() - mousePos).lengthSquared() > Consts::Epsilon) {
+            lassoPoints.emplace_back(mousePos);
         }
 
-        int count = 0;
+        int count = Interface::countSelectedAtom;
         if (lassoPoints.size() >= 3) {
+            count = 0;
+            for (std::size_t atomIndex : selected_atom_batch) {
+                if (atomIndex < atomStorage->size()) {
+                    atomStorage->setSelected(atomIndex, false);
+                }
+            }
             selected_atom_batch.clear();
-            for (Atom& atom : atoms) {
-                const sf::Vector2f atomLocalCenter(
-                    atom.coords.x + atom.getProps().radius,
-                    atom.coords.y + atom.getProps().radius
-                );
 
-                const sf::Vector2i atomScreenCenter = boxToScreen(Vec2D(atomLocalCenter.x, atomLocalCenter.y));
-
-                const bool selected = isPointInsidePolygon(atomScreenCenter, lassoPoints);
-                atom.isSelect = selected;
+            for (std::size_t atomIndex = 0; atomIndex < atomStorage->size(); ++atomIndex) {
+                const Vec3f pos = atomStorage->pos(atomIndex);
+                const Vec2f center(pos.x, pos.y);
+                const sf::Vector2i centerScreen = boxToScreen(center);
+                const bool selected = isPointInsidePolygon(centerScreen, lassoPoints);
+                atomStorage->setSelected(atomIndex, selected);
                 if (selected) {
-                    selected_atom_batch.insert(&atom);
+                    selected_atom_batch.insert(atomIndex);
                     ++count;
                 }
             }
@@ -343,7 +256,7 @@ void Tools::onLeftReleased(std::vector<Atom>& atoms) {
     atomMoveFlag = false;
     selectionFrameMoveFlag = false;
     lassoSelectionMoveFlag = false;
-    selectedMoveAtom = nullptr;
+    selectedMoveAtomIndex = InvalidIndex;
 
     rend->showBoxContour(false);
     rend->showLassoContour(false);
@@ -351,12 +264,15 @@ void Tools::onLeftReleased(std::vector<Atom>& atoms) {
     Interface::drawToolTrip = false;
 }
 
-void Tools::onFrame(std::vector<Atom>& atoms) {
+void Tools::onFrame(float deltaTime) {
+    if (!renderer || !renderer->get() || !window || !atomStorage) {
+        return;
+    }
     std::unique_ptr<IRenderer>& rend = *renderer;
-    const sf::Vector2i mouse_pos = sf::Mouse::getPosition(*window);
+    const sf::Vector2i mousePos = sf::Mouse::getPosition(*window);
 
     if (selectionFrameMoveFlag) {
-        selectionFrame(start_mouse_pos, mouse_pos, atoms);
+        selectionFrame(start_mouse_pos, mousePos);
     }
 
     if (lassoSelectionMoveFlag) {
@@ -364,76 +280,93 @@ void Tools::onFrame(std::vector<Atom>& atoms) {
         const float minWorldStep = 4.0f / std::max(zoom, 1.0f);
         const double minWorldStepSqr = static_cast<double>(minWorldStep * minWorldStep);
 
-        if (lassoPoints.empty() || (lassoPoints.back() - mouse_pos).lengthSquared() >= minWorldStepSqr) {
-            lassoPoints.emplace_back(mouse_pos);
+        if (lassoPoints.empty() || (lassoPoints.back() - mousePos).lengthSquared() >= minWorldStepSqr) {
+            lassoPoints.emplace_back(mousePos);
         }
 
         std::vector<sf::Vector2i>& contourPoints = lassoPoints;
-        if (contourPoints.empty() || (contourPoints.back() - mouse_pos).lengthSquared() > Consts::Epsilon) {
-            contourPoints.emplace_back(mouse_pos);
+        if (contourPoints.empty() || (contourPoints.back() - mousePos).lengthSquared() > Consts::Epsilon) {
+            contourPoints.emplace_back(mousePos);
         }
         syncLassoContour(rend, contourPoints);
     }
 
-    if (atomMoveFlag && selectedMoveAtom != nullptr) {
-        const Vec2D world = screenToBox(mouse_pos);
-        const Vec2D delta = Vec2D(selectedMoveAtom->coords.x, selectedMoveAtom->coords.y) - world;
-        const Vec3D force = delta * 30;
+    if (atomMoveFlag && selectedMoveAtomIndex != InvalidIndex && selectedMoveAtomIndex < atomStorage->size()) {
+        (void)deltaTime;
+        const Vec2f world = screenToBox(mousePos);
+        const Vec3f selectedPos = atomStorage->pos(selectedMoveAtomIndex);
+        const Vec2f delta = Vec2f(selectedPos.x, selectedPos.y) - world;
+        constexpr float dragStiffness = 0.1f;
+        const Vec3f force = delta * dragStiffness;
+
         if (!selected_atom_batch.empty()) {
-            for (Atom* atom : selected_atom_batch) {
-                atom->force -= force;
+            for (std::size_t atomIndex : selected_atom_batch) {
+                if (atomIndex < atomStorage->size()) {
+                    atomStorage->forceX(atomIndex) -= force.x;
+                    atomStorage->forceY(atomIndex) -= force.y;
+                    atomStorage->forceZ(atomIndex) -= force.z;
+                }
             }
-        }
-        else {
-            selectedMoveAtom->force -= force;
+        } else {
+            atomStorage->forceX(selectedMoveAtomIndex) -= force.x;
+            atomStorage->forceY(selectedMoveAtomIndex) -= force.y;
+            atomStorage->forceZ(selectedMoveAtomIndex) -= force.z;
         }
     }
 }
 
-void Tools::selectionFrame(sf::Vector2i start_mouse_pos, sf::Vector2i mouse_pos, std::vector<Atom>& atoms) {
+void Tools::selectionFrame(sf::Vector2i startMousePos, sf::Vector2i mousePos) {
+    if (!renderer || !renderer->get() || !atomStorage) {
+        return;
+    }
+
     std::unique_ptr<IRenderer>& rend = *renderer;
+    rend->setBoxContour(startMousePos, mousePos);
 
-    rend->setBoxContour(start_mouse_pos, mouse_pos);
+    Vec2f sLocal = screenToBox(startMousePos);
+    Vec2f eLocal = screenToBox(mousePos);
 
-    Vec2D s_local = screenToBox(start_mouse_pos);
-    Vec2D e_local = screenToBox(mouse_pos);
+    if (sLocal.x > eLocal.x) std::swap(sLocal.x, eLocal.x);
+    if (sLocal.y > eLocal.y) std::swap(sLocal.y, eLocal.y);
 
-    if (s_local.x > e_local.x) std::swap(s_local.x, e_local.x);
-    if (s_local.y > e_local.y) std::swap(s_local.y, e_local.y);
+    for (std::size_t atomIndex : selected_atom_batch) {
+        if (atomIndex < atomStorage->size()) {
+            atomStorage->setSelected(atomIndex, false);
+        }
+    }
+    selected_atom_batch.clear();
 
     int count = 0;
-    for (Atom& atom : atoms) {
-        if (s_local.x-0.8 <= atom.coords.x && atom.coords.x <= e_local.x &&
-            s_local.y-0.8 <= atom.coords.y && atom.coords.y <= e_local.y) {
-            atom.isSelect = true;
-            selected_atom_batch.insert(&atom);
-            count++;
+    for (std::size_t atomIndex = 0; atomIndex < atomStorage->size(); ++atomIndex) {
+        const Vec3f pos = atomStorage->pos(atomIndex);
+        const bool selected = (sLocal.x <= pos.x && pos.x <= eLocal.x &&
+                               sLocal.y <= pos.y && pos.y <= eLocal.y);
+        atomStorage->setSelected(atomIndex, selected);
+        if (selected) {
+            selected_atom_batch.insert(atomIndex);
+            ++count;
         }
-        else {
-            atom.isSelect = false;
-            selected_atom_batch.erase(&atom);
-        }   
     }
+
     Interface::drawToolTrip = true;
     Interface::countSelectedAtom = count;
 }
 
-Vec2D Tools::screenToWorld(sf::Vector2i mouse_pos) {
-    sf::Vector2f world = window->mapPixelToCoords(mouse_pos, *gameView);
-    return Vec2D(world.x, world.y);
+Vec2f Tools::screenToWorld(sf::Vector2i mousePos) {
+    sf::Vector2f world = window->mapPixelToCoords(mousePos, *gameView);
+    return Vec2f(world.x, world.y);
 }
 
-Vec2D Tools::screenToBox(sf::Vector2i mouse_pos) {
-    return screenToWorld(mouse_pos) - Vec2D(box->start.x, box->start.y);
+Vec2f Tools::screenToBox(sf::Vector2i mousePos) {
+    return screenToWorld(mousePos) - Vec2f(box->start.x, box->start.y);
 }
 
-sf::Vector2i Tools::worldToScreen(Vec2D pos)
-{
+sf::Vector2i Tools::worldToScreen(Vec2f pos) {
     return window->mapCoordsToPixel(pos, *gameView);
 }
-sf::Vector2i Tools::boxToScreen(Vec2D pos)
-{
-    return worldToScreen(pos + Vec2D(box->start.x, box->start.y));
+
+sf::Vector2i Tools::boxToScreen(Vec2f pos) {
+    return worldToScreen(pos + Vec2f(box->start.x, box->start.y));
 }
 
 Tools::Mode Tools::currentMode() {
@@ -444,91 +377,159 @@ bool Tools::isSelectionMode(Tools::Mode mode) {
     return mode == Mode::Frame || mode == Mode::Lasso;
 }
 
-Atom* Tools::pickAtom(sf::Vector2i mouse_pos) {
-    std::unique_ptr<IRenderer>& rend = *renderer;
+std::size_t Tools::pickAtom(sf::Vector2i mousePos) {
+    if (!renderer || !renderer->get() || !box || !grid || !atomStorage) {
+        return InvalidIndex;
+    }
 
-    const Vec2D local = screenToBox(mouse_pos);
+    const Vec2f local = screenToBox(mousePos);
     const int cellX = grid->worldToCellX(local.x);
     const int cellY = grid->worldToCellY(local.y);
     if (cellX < 0 || cellY < 0) {
-        return nullptr;
+        return InvalidIndex;
     }
 
-    Atom* best = nullptr;
+    std::size_t bestIndex = InvalidIndex;
     double bestDistSqr = std::numeric_limits<double>::max();
 
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
-            grid->forEachAtXY(cellX + dx, cellY + dy, [&](Atom* atom) {
-                const Vec2D center(
-                    atom->coords.x + atom->getProps().radius,
-                    atom->coords.y + atom->getProps().radius
-                );
-                const Vec2D delta = center - local;
-                const double distSqr = delta.sqrAbs();
-                const double pickRadius = std::max(0.5, atom->getProps().radius);
-                if (distSqr <= pickRadius * pickRadius && distSqr < bestDistSqr) {
-                    bestDistSqr = distSqr;
-                    best = atom;
+            for (int z = 0; z < grid->sizeZ; ++z) {
+                const auto* indexCell = grid->atIndex(cellX + dx, cellY + dy, z);
+                if (!indexCell) {
+                    continue;
                 }
-            });
+                for (std::size_t atomIndex : *indexCell) {
+                    if (atomIndex >= atomStorage->size()) {
+                        continue;
+                    }
+                    const Vec3f pos = atomStorage->pos(atomIndex);
+                    const float radius = std::max(0.5f, AtomData::getProps(atomStorage->type(atomIndex)).radius);
+                    const Vec2f center(pos.x, pos.y);
+                    const Vec2f delta = center - local;
+                    const double distSqr = delta.sqrAbs();
+                    if (distSqr <= radius * radius && distSqr < bestDistSqr) {
+                        bestDistSqr = distSqr;
+                        bestIndex = atomIndex;
+                    }
+                }
+            }
         }
     }
 
-    return best;
+    return bestIndex;
 }
 
-bool Tools::tryAddAtom(sf::Vector2i mouse_pos, std::vector<Atom>& atoms, Atom::Type atomType) {
-    if (!box || !atomCreator) {
-        return false;
+std::size_t Tools::pickSelectedAtomWithPadding(sf::Vector2i mousePos, float zoom) {
+    if (!box || !atomStorage || selected_atom_batch.empty()) {
+        return InvalidIndex;
     }
-    std::unique_ptr<IRenderer>& rend = *renderer;
 
-    const Vec2D local = screenToBox(mouse_pos);
+    const Vec2f world = screenToWorld(mousePos);
+    const Vec2f local(world.x - box->start.x, world.y - box->start.y);
 
-    const double atomRadius = Atom::getProps(atomType).radius;
-    Vec3D spawnPos = Vec3D(local - atomRadius / 2.0, (box->end.z - box->start.z) * 0.5);
+    std::size_t bestIndex = InvalidIndex;
+    double bestDistSqr = std::numeric_limits<double>::max();
 
-    bool hasNearAtom = false;
-    for (Atom& atom : atoms) {
-        if ((atom.coords - spawnPos).abs() <= atom.getProps().radius + atomRadius) {
-            hasNearAtom = true;
-            break;
+    const float selectedCount = static_cast<float>(selected_atom_batch.size());
+    const float extraPixels = 10.0f + std::min(20.0f, std::log2(selectedCount + 1.0f) * 6.0f);
+    const double extraWorld = static_cast<double>(extraPixels / std::max(zoom, 1.0f));
+
+    for (std::size_t atomIndex : selected_atom_batch) {
+        if (atomIndex >= atomStorage->size()) {
+            continue;
+        }
+        const Vec3f pos = atomStorage->pos(atomIndex);
+        const float radius = AtomData::getProps(atomStorage->type(atomIndex)).radius;
+        const Vec2f center(pos.x, pos.y);
+        const Vec2f delta = center - local;
+        const double distSqr = delta.sqrAbs();
+        const float pickRadius = std::max(0.5f, radius) + extraWorld;
+        if (distSqr <= pickRadius * pickRadius && distSqr < bestDistSqr) {
+            bestDistSqr = distSqr;
+            bestIndex = atomIndex;
         }
     }
 
-    if (hasNearAtom) {
-        return false;
-    }
-
-    return atomCreator(spawnPos, Vec3D::Random() * 5.f, atomType, false) != nullptr;
+    return bestIndex;
 }
 
-bool Tools::tryRemoveAtom(sf::Vector2i mouse_pos, std::vector<Atom>& atoms, Atom*& selectedMoveAtom) {
-    if (!grid || atoms.empty()) {
+bool Tools::tryAddAtom(sf::Vector2i mousePos, AtomData::Type atomType) {
+    if (!box || !atomCreator || !atomStorage) {
         return false;
     }
 
-    Atom* target = pickAtom(mouse_pos);
-    if (!target) {
+    const Vec2f worldPos = screenToWorld(mousePos);
+
+    if (!(box->start.x + 2 <= worldPos.x && worldPos.x <= box->end.x - 2 &&
+          box->start.y + 2 <= worldPos.y && worldPos.y <= box->end.y - 2)) {
+        return false;
+    }
+
+    const Vec2f spawnPos = screenToBox(mousePos);
+    const float atomRadius = AtomData::getProps(atomType).radius;
+
+    for (std::size_t atomIndex = 0; atomIndex < atomStorage->size(); ++atomIndex) {
+        const Vec3f atomPos = atomStorage->pos(atomIndex);
+        const float radius = AtomData::getProps(atomStorage->type(atomIndex)).radius;
+        if ((Vec2f(atomPos.x, atomPos.y) - spawnPos).abs() <= 2.f * (radius + atomRadius)) {
+            return false;
+        }
+    }
+
+    return atomCreator(spawnPos, Vec3f::Random() * 5.f, atomType, false);
+}
+
+bool Tools::tryRemoveAtom(sf::Vector2i mousePos) {
+    if (!grid || !atomStorage || atomStorage->empty() || !atomRemover) {
+        return false;
+    }
+
+    const std::size_t target = pickAtom(mousePos);
+    if (target == InvalidIndex || target >= atomStorage->size()) {
         return false;
     }
 
     bool removed = false;
-    if (target->isSelect && !selected_atom_batch.empty()) {
-        while (!selected_atom_batch.empty()) {
-            Atom* selectedTarget = *selected_atom_batch.begin();
-            if (!removeAtomInternal(selectedTarget, grid, atoms, selectedMoveAtom, false)) {
-                selected_atom_batch.erase(selectedTarget);
-                continue;
-            }
-            removed = true;
+    const bool removeSelection = atomStorage->isSelected(target) && !selected_atom_batch.empty();
+    const auto removeByIndex = [&](std::size_t index) -> bool {
+        if (index >= atomStorage->size()) {
+            return false;
         }
-        if (removed) {
-            rebuildGrid(grid, atoms);
+
+        const std::size_t oldSize = atomStorage->size();
+        const std::size_t movedFrom = oldSize - 1;
+        if (!atomRemover(index)) {
+            return false;
+        }
+
+        selected_atom_batch.erase(index);
+        if (selectedMoveAtomIndex == index) {
+            selectedMoveAtomIndex = InvalidIndex;
+        }
+
+        if (index < movedFrom) {
+            if (selected_atom_batch.erase(movedFrom) > 0) {
+                selected_atom_batch.insert(index);
+            }
+            if (selectedMoveAtomIndex == movedFrom) {
+                selectedMoveAtomIndex = index;
+            }
+        }
+
+        return true;
+    };
+
+    if (removeSelection) {
+        std::vector<std::size_t> toRemove(selected_atom_batch.begin(), selected_atom_batch.end());
+        std::sort(toRemove.begin(), toRemove.end(), std::greater<std::size_t>());
+        for (std::size_t index : toRemove) {
+            if (removeByIndex(index)) {
+                removed = true;
+            }
         }
     } else {
-        removed = removeAtomInternal(target, grid, atoms, selectedMoveAtom, true);
+        removed = removeByIndex(target);
     }
 
     Interface::countSelectedAtom = static_cast<int>(selected_atom_batch.size());

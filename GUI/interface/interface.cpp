@@ -21,10 +21,10 @@ Simulation* Interface::simulation = nullptr;
 std::unique_ptr<IRenderer>* Interface::renderer = nullptr;
 
 sf::Clock Interface::clock;
-int Interface::selectedAtom = -1;
+int Interface::selectedAtom = 0;
 bool Interface::pause;
 bool Interface::cursorHovered = false;
-float Interface::simulationSpeed = 1;
+float Interface::simulationSpeed = 100.f;
 double Interface::averageEnergy = 0.0;
 int Interface::countSelectedAtom = 0;
 bool Interface::drawToolTrip = false;
@@ -55,6 +55,12 @@ int Interface::init(sf::RenderWindow& w, Simulation& s, std::unique_ptr<IRendere
     if (!ImGui_ImplOpenGL3_Init("#version 150")) return EXIT_FAILURE;
     if (!ImGui_ImplOpenGL3_CreateFontsTexture()) return EXIT_FAILURE;
     return EXIT_SUCCESS;
+}
+
+void Interface::shutdown() {
+    ImGui_ImplOpenGL3_DestroyFontsTexture();
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui::SFML::Shutdown();
 }
 
 float Interface::getSimulationSpeed() {
